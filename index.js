@@ -382,3 +382,23 @@ exports.generateThumbnail = functions.storage.object().onFinalize((object) => {
     // [END thumbnailGeneration]
 });
 // [END generateThumbnail]
+
+
+// ==========================================================================
+//          User DB Instance Deletion
+// ==========================================================================
+
+exports.removeUserFromDatabase = functions.auth.user()
+    .onDelete(function(event) {
+    // Get the uid of the deleted user.
+    var uid = event.uid;
+
+    db.collection("users").doc(uid).delete()
+    .then(function() {
+        console.log("Document successfully deleted!");
+    })
+    .catch(function(error) {
+        console.error("Error removing document: ", error);
+    });
+
+});
