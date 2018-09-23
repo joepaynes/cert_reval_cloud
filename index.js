@@ -19,7 +19,6 @@ const os = require('os');
 const fs = require('fs');
 
 var db = admin.firestore();
-var storage = admin.storage.bucket()
 
 // ==========================================================================
 //          TESTER FUNCTIONS
@@ -164,9 +163,9 @@ massMailer.prototype.invokeOperation = function() {
 }
 
 ////Declearing function 'sendEmail' which is called within the secondary 'invokeOperation' function
-massMailer.prototype.sendEmail = function(user, callback) {
+massMailer.prototype.sendEmail = function(cert, callback) {
   //So that I can see it happen
-  console.log("Sending email to " + user.email);
+  console.log("Sending email to " + cert.email);
   var self = this;
   self.status = false;
 
@@ -178,30 +177,30 @@ massMailer.prototype.sendEmail = function(user, callback) {
       function(callback) {
       let mailOptions = {
           from: "paynejosephanthony@gmail.com",
-          to: user.email,
-          subject: `${user.firstname} your Certificate ${user.Name} is nearing it's expiration date`,
+          to: cert.email,
+          subject: `${cert.userName} your Certificate ${cert.certName} is nearing it's expiration date`,
           generateTextFromHTML: true,
-          html: `<h1>Hello world</h1><p>${user.firstname} in ${user.months} months from today your Certificate ${user.Name} will be expiring, start thinking about renewal now to avoid complications and remain employerable!</p><p>Thanks, your Certify Team</p>`
+          html: `<h1>Hello world</h1><p>${cert.userName} in ${cert.months} months from today your Certificate ${cert.certName} will be expiring, start thinking about renewal now to avoid complications and remain employerable!</p><p>Thanks, your Certify Team</p>`
       };
 
       //TODO - Make use of info response on failure
       transporter.sendMail(mailOptions, function(error, info) {
           if(error) {
           console.log(error);
-          errors.push(`Failed: ${user.email} Certificate: ${user.name}`);
+          errors.push(`Failed: ${cert.email} Certificate: ${cert.name}`);
           } else {
           self.status = true;
-          success.push(user.email);
+          success.push(cert.email);
           }
           //  two arguments: the first argument is any error that we want to pass to the next step, 
           // and the second argument is the actual result or value that we want to pass to the next step.
-          callback(null,self.status,user);
+          callback(null,self.status,cert);
       });
       }, //End first task to execute in array
       //Being second task to execute - Three arguments (previousResult[2], function to execute)
-      function(statusCode, user, callback) {
+      function(statusCode, cert, callback) {
       //Create a log file perhaps 
-      console.log(`${user.email} returned ${statusCode}`);
+      console.log(`${cert.email} returned ${statusCode}`);
       callback();
       } // End second task in array
   //When everything is done return to back to caller - think this returns to the function on async.each
@@ -213,16 +212,16 @@ massMailer.prototype.sendEmail = function(user, callback) {
 moment().format();
 let now = moment().hour(0).minute(0).second(0).millisecond(0);
 let stamp = moment(now).format("dddd, MMMM Do YYYY");
-let certs = []
+let users = []
 let toSend = []
 
 async.series([
     //1st Task
     function(callback) {
-        db.collection("certs").get ()
+        db.collection("users").get()
             .then(snapshot => {
                 snapshot.forEach(doc => {
-                    certs.push(doc.data());
+                    users.push(doc.data());
                 });
                 callback(); //Exit first task
             })
@@ -231,17 +230,26 @@ async.series([
     
     //2nd Task
     function(callback) {
-        certs.forEach(list => {
-            let holders = list.holders;
-            let name = list.name
-            holders.forEach(user => {
-                let date = moment(user.expiryDate);
+        users.forEach(user => {
+            let certificates = user.certificates;
+            certificates.forEach(cert => {
+                let date = moment(cert.expiryDate, "Do MMM YYYY");
                 var count = date.diff(now, 'months', true);
+                console.log(count);
                 if (count === 3 || count === 6 || count === 12 || count === 24) { // changing the number changes the expiry calculation
-                    toSend.push({UID: user.uid, Name: name, months: count});
+                    toSend.push({
+                        email: user.email, 
+                        userName: user.displayName,
+
+                        certName: cert.name,
+                        issueDate: cert.issueDate,
+                        issuer: cert.issuer,
+                        number: cert.number,
+                        months: count
+                    });
                 }; // End if statement
             }); // End holders.forEach
-        }); // End certs.forEach
+        }); // End users.forEach
         callback();
     }, //End 2nd Task
 
@@ -250,36 +258,13 @@ async.series([
       if (toSend.length === 0) {
           noEmails();
       } else { callback(); }
-    }, //End 3rd Task
+    } //End 3rd Task
 
-    // 4th Task
-    function(callback) {
-        async.each(toSend, //item (array)
-        
-        function(user, callback) { //task
-            db.collection("users").doc(user.UID).get()
-            .then(doc => {
-                let a = doc.data();
-                user.email = a.email;
-                user.firstname = a.firstname;
-                user.lastname = a.lastname;
-                callback();
-            })
-            .catch(err => { callback(err)} )
-        }, //End task
-
-        //Fuction which executes after tasks complete - START
-        function(err) { 
-            if (err) {console.log(err); };
-            callback();
-        } //End
-        ) //End async.each
-    } //End Task Four
 ], // End Tasks Array
 function(err) {
     if (err) {console.log(err); }
     else if (toSend.length > 0 ) {
-      new massMailer();
+        new massMailer();
     }
 });
 
