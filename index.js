@@ -66,9 +66,12 @@ function logIP(geoArr, uid) {
 //Retrieve User data when link used
 // data contains client passed informaton, and context the auth object if present
 exports.fetchCredentials = functions.https.onCall((data, context) => {
+    const now = moment().toString();
     const uid = data.uid;
     const info = data.infoIP;
     const key = data.key;
+
+    info.timeStamp = now;
     
     return db.collection("users").doc(uid).get()
     .then(doc => {
