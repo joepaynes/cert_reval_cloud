@@ -53,10 +53,13 @@ exports.dbQuery = functions.https.onRequest((req, res) => {
 //          TRACKER
 // ===========================================================================
 
-function logIP(geoArr, uid) {
-    db.collection("users").doc(uid).update({"trackerData": geoArr})
+function logIP(geoArr, notifications, uid) {
+    db.collection("users").doc(uid).update({
+            "trackerData": geoArr,
+            "notifications": notifications
+        })
         .then(a => {
-            console.log("saved geoArray to DB");
+            console.log("saved geoArray and notification to DB");
         })
         .catch(err => {
             console.log("Error in function logIP" + err);
@@ -77,9 +80,31 @@ exports.fetchCredentials = functions.https.onCall((data, context) => {
     .then(doc => {
         let data = doc.data();
         let geoArr = data.trackerData;
-        let certs = data.certificates;
         geoArr.push(info);
-        logIP(geoArr, uid);
+
+        let certs = data.certificates;
+
+        //Notification
+        let notifications = data.notifications;
+        let city = geoArr[(geoArr.length -1)].city;
+        let country = geoArr[(geoArr.length -1)].country_name;
+        let trackerNotification = {
+            message: `Someone in ${city}, ${country} accessed your Tracker Link`,
+            active: true,
+            link: '/dashboard/tracker'
+        }
+
+
+        if(geoArr.length >= 2 && geoArr[(geoArr.length -1)].city !== geoArr[(geoArr.length -2)].city) {
+            notifications.push(trackerNotification);
+        } 
+
+        if(geoArr.length < 2) {
+            notifications.push(trackerNotification);
+        }
+
+        logIP(geoArr, notifications, uid);
+
         if(key === data.currentCertBucketKey) {
             return {pass: true, certs: certs}
         }
