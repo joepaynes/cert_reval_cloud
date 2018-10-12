@@ -8,7 +8,7 @@ admin.initializeApp({
 });
 
 const moment = require('moment');
-const async = require('async');
+const asyncModule = require('async');
 const nodemailer = require('nodemailer');
 
 //Thumbnail requires
@@ -53,69 +53,89 @@ exports.dbQuery = functions.https.onRequest((req, res) => {
 //          TRACKER
 // ===========================================================================
 
-function logIP(geoArr, notifications, uid) {
-    db.collection("users").doc(uid).update({
-            "trackerData": geoArr,
-            "notifications": notifications
-        })
-        .then(a => {
-            console.log("saved geoArray and notification to DB");
-        })
-        .catch(err => {
-            console.log("Error in function logIP" + err);
-        })
-}
-
-//Retrieve User data when link used
-// data contains client passed informaton, and context the auth object if present
 exports.fetchCredentials = functions.https.onCall((data, context) => {
-    const now = moment().toString();
+
+    //Declare variables
     const uid = data.uid;
-    const info = data.infoIP;
     const key = data.key;
 
-    info.timeStamp = now;
-    
+    //Grab and compare key
     return db.collection("users").doc(uid).get()
     .then(doc => {
-        let data = doc.data();
-        let geoArr = data.trackerData;
-        geoArr.push(info);
+        let userData = doc.data();
 
-        let certs = data.certificates;
-
-        //Notification
-        let notifications = data.notifications;
-        let city = geoArr[(geoArr.length -1)].city;
-        let country = geoArr[(geoArr.length -1)].country_name;
-        let trackerNotification = {
-            message: `Someone in ${city}, ${country} accessed your Tracker Link`,
-            active: true,
-            link: '/dashboard/tracker'
-        }
-
-
-        if(geoArr.length >= 2 && geoArr[(geoArr.length -1)].city !== geoArr[(geoArr.length -2)].city) {
-            notifications.push(trackerNotification);
-        } 
-
-        if(geoArr.length < 2) {
-            notifications.push(trackerNotification);
-        }
-
-        logIP(geoArr, notifications, uid);
-
-        if(key === data.currentCertBucketKey) {
-            return {pass: true, certs: certs}
-        }
-        else {
-            return {pass: false}
+        //If a match, send data back
+        // Data is sent back to the Application in an Object - It expects {pass: boolean} at the very least.
+        if(key === userData.currentCertBucketKey) {
+            return {
+                pass: true,
+                certificates: userData.certificates
+                //RETURN OTHER DATA HERE IN FUTURE - USER NAME, SEA CALC DATA etc.
+            }
+        } else {
+            //If not a match, send fail
+            return {
+                pass:false
+            }
         }
     })
-    .catch(err => {
-        console.log("Error in function fetchCredentials" + err);
-        return {error: err};
+    .catch(error => {
+        return {error}
     })
+});
+
+// END fetchCredentials function
+
+exports.logTrackerData = functions.https.onCall((data, context) => {
+
+    //Declare variables
+    const ipInfo = data.parsedInfo
+    const uid = data.uid
+    const pass = data.pass
+
+    //Manipulate data (Add timestamp)
+    const now = moment().toString();
+    ipInfo.timeStamp = now
+    ipInfo.passed = pass
+
+    //Post data to User DB & Notify User
+    let logData = async function () {
+        try {
+            let doc = await db.collection("users").doc(uid).get()
+            let userData = await doc.data();
+            let notifications = userData.notifications;
+            let trackerData = userData.trackerData;
+
+            //Update Tracker Array
+            trackerData.push(ipInfo);
+
+            //Make notification
+            const trackerNotification = {
+                message: `Someone in ${ipInfo.city}, ${ipInfo.country_name} accessed your Tracker Link`,
+                active: true,
+                link: '/dashboard/tracker',
+                timeStamp: now
+            }
+
+            //Decide whether to push to notify user
+            // RIGHT NOW all link hits are pushed
+
+
+            //Update Notification Array 
+            notifications.push(trackerNotification);
+
+            //Push both Updates to User DB
+            let ref = await db.collection("users").doc(uid).update({
+                "trackerData": trackerData,
+                "notifications": notifications
+            })
+        } catch (error) {
+            return {error}
+        }
+        return {logged: true}
+    }
+
+    return logData()
 });
 
 // ==========================================================================
@@ -180,14 +200,14 @@ massMailer.prototype.invokeOperation = function() {
 // in items as the first argument. All tasks are run in parallel. 
 // Example: task(item[0]), task(item[1]) … task(item[n]). Once all tasks complete the final callback will 
 // be called
-  async.each(toSend, self.sendEmail, function() {
-    console.log(success);
-    console.log(errors);
-    //========================
-    //Upon completion Email logs to Ben and Joe
-    //========================
-    someEmails();
-  });
+    asyncModule.each(toSend, self.sendEmail, function() {
+        console.log(success);
+        console.log(errors);
+        //========================
+        //Upon completion Email logs to Ben and Joe
+        //========================
+        someEmails();
+    });
 }
 
 ////Declearing function 'sendEmail' which is called within the secondary 'invokeOperation' function
@@ -200,7 +220,7 @@ massMailer.prototype.sendEmail = function(cert, callback) {
 // The first argument is an array and the second argument is a function.
 // Using the first argument (i.e. the array), you can specify what you want to run in order.
 // Using the second argument (i.e. the function), you can catch any errors that happens in any of the steps.
-  async.waterfall([
+  asyncModule.waterfall([
       //First task to execute in the array
       function(callback) {
       let mailOptions = {
@@ -243,7 +263,7 @@ let stamp = moment(now).format("dddd, MMMM Do YYYY");
 let users = []
 let toSend = []
 
-async.series([
+asyncModule.series([
     //1st Task
     function(callback) {
         db.collection("users").get()
