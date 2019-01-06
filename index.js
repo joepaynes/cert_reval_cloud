@@ -12,13 +12,6 @@ const moment = require('moment');
 const asyncModule = require('async');
 const nodemailer = require('nodemailer');
 
-//Thumbnail requires
-const gcs = require('@google-cloud/storage')();
-const spawn = require('child-process-promise').spawn;
-const path = require('path');
-const os = require('os');
-const fs = require('fs');
-
 var db = admin.firestore();
 
 // ==========================================================================
@@ -339,7 +332,7 @@ function noEmails() {
 }) // End function expiryCheck
 
 // ==========================================================================
-//          CONTACT FORM EMAIL / FEEBACK EMAIL
+//          CONTACT FORM EMAIL / FEEDBACK EMAIL
 // ==========================================================================
 
 exports.contactForm = functions.https.onCall((data, context) => {
