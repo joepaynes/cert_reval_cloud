@@ -1,6 +1,7 @@
 // ==========================================================================
 //          CLOUD FUNCTION SETUP
 // ==========================================================================
+const { clientID, secret, refreshToken, accessToken } = require('./keys');
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 admin.initializeApp({
@@ -21,61 +22,39 @@ const fs = require('fs');
 var db = admin.firestore();
 
 // ==========================================================================
-//          TESTER FUNCTIONS
-// ==========================================================================
-
-// Take the text parameter passed to this HTTP endpoint and insert it into the
-// Realtime Database under the path /messages/:pushId/original
-exports.addMessage = functions.https.onRequest((req, res) => {
-    // Grab the text parameter.
-    const original = req.query.text;
-    // Push the new message into the Realtime Database using the Firebase Admin SDK.
-    db.collection('messages').doc('test').set({original: original}).then(
-      // Redirect with 303 SEE OTHER to the URL of the pushed object in the Firebase console.
-      res.send('DB Write Complete')
-    );
-  });
-
-exports.dbQuery = functions.https.onRequest((req, res) => {
-  var userRef = db.collection('users');
-  var allUsers = userRef.get()
-  .then(snapshot => {
-    snapshot.forEach(doc => {
-      console.log(doc.id, '=>', doc.data());
-    });
-  })
-  .catch(err => {
-    console.log('Error getting documents', err);
-  });
-})
-
-// ==========================================================================
 //          TRACKER
 // ===========================================================================
 
 exports.fetchCredentials = functions.https.onCall((data, context) => {
 
     //Declare variables
-    const uid = data.uid;
-    const key = data.key;
+    const { key, uid } = data;
 
     //Grab and compare key
     return db.collection("users").doc(uid).get()
     .then(doc => {
         let userData = doc.data();
+        let profile = {
+            photoUrl: userData.photoUrl,
+            FNAME: userData.FNAME,
+            LNAME: userData.LNAME,
+            homeport: userData.homeport
+        }
 
         //If a match, send data back
         // Data is sent back to the Application in an Object - It expects {pass: boolean} at the very least.
         if(key === userData.currentCertBucketKey) {
             return {
                 pass: true,
-                certificates: userData.certificates
-                //RETURN OTHER DATA HERE IN FUTURE - USER NAME, SEA CALC DATA etc.
+                certificates: userData.certificates,
+                profile: profile,
+                seatime: userData.seatime
             }
         } else {
-            //If not a match, send fail
+            //If not a match, send fail and only basic profile information
             return {
-                pass:false
+                pass:false,
+                profile: profile
             }
         }
     })
@@ -162,10 +141,6 @@ if (key != localKey) {
 
 let errors = [];
 let success = [];
-const clientID = "438970100782-f7dmq5mfqnarctd7ju4vtmocm4edvsuq.apps.googleusercontent.com";
-const secret = "erxJpgn594osgQpIB57_O2Am";
-const refreshToken = "1/TXQ5ucvLtZnw2_2Os-XgReuO9IvF9xh6LLoG11MfMfks7KTq3HryRPjwI9Me7FKs";
-const accessToken = "ya29.GlueBcl0VkEsTCObeVJE5ObGzjo5hzSK-8_xb1FiqeagmWYdZxI7HPw21VYxayOsks9wVgOggw1jRo0p8Q5NgAYHWLKZT0spkcnN9AF78cQTukXHd0MZHdkVxnhn";
 
 // OPEN TRANSPORTER
 const transporter = nodemailer.createTransport({
@@ -363,74 +338,101 @@ function noEmails() {
 
 }) // End function expiryCheck
 
-
 // ==========================================================================
-//          Thumbnail generation
+//          CONTACT FORM EMAIL / FEEBACK EMAIL
 // ==========================================================================
 
-// [START generateThumbnail]
-/**
- * When an image is uploaded in the Storage bucket We generate a thumbnail automatically using
- * ImageMagick.
- */
-// [START generateThumbnailTrigger]
-exports.generateThumbnail = functions.storage.object().onFinalize((object) => {
-    // [END generateThumbnailTrigger]
-
-    // [START eventAttributes]
-    const fileBucket = object.bucket; // The Storage bucket that contains the file.
-    const filePath = object.name; // File path in the bucket.
-    const contentType = object.contentType; // File content type.
-    const metageneration = object.metageneration; // Number of times metadata has been generated. New objects have a value of 1.
-    // [END eventAttributes]
-
-    // [START stopConditions]
-    // Exit if this is triggered on a file that is not an image.
-    if (!contentType.startsWith('image/')) {
-    console.log('This is not an image.');
-    return null;
-    }
-
-    // Get the file name.
-    const fileName = path.basename(filePath);
-    // Exit if the image is already a thumbnail.
-    if (fileName.startsWith('thumb_')) {
-    
-    console.log('Already a Thumbnail.');
-    return null;
-    }
-    // [END stopConditions]
-
-    // [START thumbnailGeneration]
-    // Download file from bucket.
-    const bucket = gcs.bucket(fileBucket);
-    const tempFilePath = path.join(os.tmpdir(), fileName);
-    const metadata = {
-    contentType: contentType,
-    };
-    return bucket.file(filePath).download({
-    destination: tempFilePath,
-    }).then(() => {
-    console.log('Image downloaded locally to', tempFilePath);
-    // Generate a thumbnail using ImageMagick.
-    return spawn('convert', [tempFilePath, '-thumbnail', '200x200>', tempFilePath]);
-    }).then(() => {
-    console.log('Thumbnail created at', tempFilePath);
-    // We add a 'thumb_' prefix to thumbnails file name. That's where we'll upload the thumbnail.
-    const thumbFileName = `thumb_${fileName}`;
-    const thumbFilePath = path.join(path.dirname(filePath), thumbFileName);
-    // Uploading the thumbnail.
-    return bucket.upload(tempFilePath, {
-        destination: thumbFilePath,
-        metadata: metadata,
+exports.contactForm = functions.https.onCall((data, context) => {
+    // OPEN TRANSPORTER
+    const transporter = nodemailer.createTransport({
+        pool: true,
+        host: 'smtp.gmail.com',
+        secure: true,
+        auth: {
+            type: 'OAuth2',
+            user: 'paynejosephanthony@gmail.com',
+            clientId: clientID,
+            clientSecret: secret,
+            refreshToken: refreshToken,
+            accessToken: accessToken,
+            expires: 1484314697598
+        }
     });
-    // Once the thumbnail has been uploaded delete the local file to free up disk space.
-    }).then(() => fs.unlinkSync(tempFilePath));
 
-    // [END thumbnailGeneration]
+    if(data.values.feedback) {
+        const { name, uid, email, subject, message, location } = data.values;
+
+        let mailOptions = {
+            from: "paynejosephanthony@gmail.com",
+            to: "payne.joe@hotmail.co.nz, bennypayne12@gmail.com",
+            subject: `Someone left Feedback on "${subject}"`,
+            generateTextFromHTML: true,
+            html: 
+            `
+                <h1>User Feedback</h1>
+                <h3>Name: ${name}</h3>
+                <h3>Email: ${email}</h3>
+                <h3>Subject: ${subject}</h2>
+                <p>Message: ${message}</p>
+                <br />
+                <br />
+                <p>UID: ${uid}</p>
+                <p>Location: ${location}</p>
+            `
+        };
+
+        let feedbackEmail = () => {
+            new Promise((resolve, reject) => {
+                transporter.sendMail(mailOptions, (error, info) => {
+                    if(error) { 
+                        reject(error);
+                        transporter.close(); 
+                    } else { 
+                        resolve(info);
+                        transporter.close();
+                    }
+                })
+            })
+        }
+
+        return feedbackEmail()
+
+    } else {
+        const { name, email, subject, message } = data.values;
+
+        let mailOptions = {
+            from: "paynejosephanthony@gmail.com",
+            to: "payne.joe@hotmail.co.nz, bennypayne12@gmail.com",
+            subject: `Contact Form Email - ${subject}`,
+            generateTextFromHTML: true,
+            html: 
+            `
+                <h1>Contact Form Submission</h1>
+                <h3>Subject: ${subject}</h2>
+                <h3>Name: ${name}</h3>
+                <h3>Email: ${email}</h3>
+                <p>Message: ${message}</p>
+            `
+        };
+
+        let contactEmail = () => {
+            new Promise((resolve, reject) => {
+                transporter.sendMail(mailOptions, (error, info) => {
+                    if(error) { 
+                        reject(error);
+                        transporter.close(); 
+                    } else { 
+                        resolve(info);
+                        transporter.close();
+                    }
+                })
+            })
+        }
+
+        return contactEmail()
+    }
 });
-// [END generateThumbnail]
-
+//End Contact Form Function
 
 // ==========================================================================
 //          User DB Instance Deletion
