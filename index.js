@@ -18,36 +18,47 @@ var db = admin.firestore();
 //          TRACKER
 // ===========================================================================
 
-exports.fetchCredentials = functions.https.onCall((data, context) => {
+exports.fetchCredentials = functions.https.onCall(data => {
 
-    //Declare variables
-    const { key, uid } = data;
+    //Declare variables - key passed in data from certBucket.jsx
+    const { key } = data;
 
-    //Grab and compare key
-    return db.collection("users").doc(uid).get()
+    // 1) Check if the link exists and grab link data
+    return db.collection("links").doc(key).get()
     .then(doc => {
-        let userData = doc.data();
-        let profile = {
-            photoUrl: userData.photoUrl,
-            FNAME: userData.FNAME,
-            LNAME: userData.LNAME,
-            homeport: userData.homeport
-        }
+        // Link exists
+        if(doc.exists) {
+            let linkData = doc.data();
+            let uid = linkData.uid
 
-        //If a match, send data back
-        // Data is sent back to the Application in an Object - It expects {pass: boolean} at the very least.
-        if(key === userData.currentCertBucketKey) {
-            return {
-                pass: true,
-                certificates: userData.certificates,
-                profile: profile,
-                seatime: userData.seatime
-            }
+            // 2) Grab and return userData
+            return db.collection("users").doc(uid).get()
+            .then(doc => {
+                let userData = doc.data();
+                let profile = {
+                    photoUrl: userData.photoUrl,
+                    FNAME: userData.FNAME,
+                    LNAME: userData.LNAME,
+                    homeport: userData.homeport,
+                    bio: userData.bio,
+                    phone: userData.phone,
+                    email: userData.email
+                }
+
+                return {
+                    pass: true,
+                    uid: uid,
+                    certificates: userData.certificates,
+                    profile: profile,
+                    seatime: userData.seatime
+                }
+            })
+            .catch(error => {
+                return {error}
+            })
         } else {
-            //If not a match, send fail and only basic profile information
             return {
-                pass:false,
-                profile: profile
+                pass: false
             }
         }
     })
@@ -58,49 +69,69 @@ exports.fetchCredentials = functions.https.onCall((data, context) => {
 
 // END fetchCredentials function
 
-exports.logTrackerData = functions.https.onCall((data, context) => {
+exports.logTrackerData = functions.https.onCall(data => {
 
     //Declare variables
-    const ipInfo = data.parsedInfo
-    const uid = data.uid
-    const pass = data.pass
+    const ipInfo = data.parsedInfo;
+    const uid = data.uid;
+    const key = data.key
 
     //Manipulate data (Add timestamp)
     const now = moment().toString();
-    ipInfo.timeStamp = now
-    ipInfo.passed = pass
+    ipInfo.timeStamp = now;
 
     //Post data to User DB & Notify User
     let logData = async function () {
         try {
-            let doc = await db.collection("users").doc(uid).get()
-            let userData = await doc.data();
+            let userDoc = await db.collection("users").doc(uid).get()
+            let linkDoc = await db.collection("links").doc(key).get()
+
+            let userData = await userDoc.data();
+            let linkData = await linkDoc.data();
+
             let notifications = userData.notifications;
             let trackerData = userData.trackerData;
+            let name = false
 
-            //Update Tracker Array
-            trackerData.push(ipInfo);
-
-            //Make notification
-            const trackerNotification = {
-                message: `Someone in ${ipInfo.city}, ${ipInfo.country_name} accessed your Tracker Link`,
-                active: true,
-                link: '/dashboard/tracker',
-                timeStamp: now
+            
+            if(linkData.name) {
+                name = linkData.name
+                ipInfo.name = name
             }
 
+            //Check if same IP has accessed within the last minute
+            let check = false
+            let minusFive = moment(ipInfo.timeStamp).subtract(1, 'minutes');
+
+            if(trackerData.length >= 1) {
+                check = minusFive.isAfter(moment(trackerData[trackerData.length-1].timeStamp))
+            } else {
+                check = true
+            }
             //Decide whether to push to notify user
-            // RIGHT NOW all link hits are pushed
+            if(check) {
+                //Update Tracker Array
+                trackerData.push(ipInfo);
 
+                let city = ipInfo.city ? `${ipInfo.city}, `:""
 
-            //Update Notification Array 
-            notifications.push(trackerNotification);
+                //Make notification
+                const trackerNotification = {
+                    message: `${name ? name:"Someone"} accessed your Profile from ${city}${ipInfo.country_name}`,
+                    active: true,
+                    link: '/dashboard/tracker',
+                    timeStamp: now
+                }
 
-            //Push both Updates to User DB
-            let ref = await db.collection("users").doc(uid).update({
-                "trackerData": trackerData,
-                "notifications": notifications
-            })
+                //Update Notification Array 
+                notifications.push(trackerNotification);
+
+                //Push both Updates to User DB
+                let ref = await db.collection("users").doc(uid).update({
+                    "trackerData": trackerData,
+                    "notifications": notifications
+                })
+            }
         } catch (error) {
             return {error}
         }
